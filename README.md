@@ -73,6 +73,7 @@ curl http://localhost:9200
 
 ### 方式二：本地安装
 
+#### Windows / Mac
 1. 访问 [https://www.elastic.co/downloads/elasticsearch](https://www.elastic.co/downloads/elasticsearch) 下载 8.x 版本
 2. 解压后进入目录，编辑 `config/elasticsearch.yml`，添加：
    ```yaml
@@ -80,11 +81,67 @@ curl http://localhost:9200
    ```
 3. 启动：
    ```bash
-   # Linux/Mac
+   # Mac/Linux
    ./bin/elasticsearch
    # Windows
    bin\elasticsearch.bat
    ```
+
+#### Linux（apt / yum）
+
+**Ubuntu / Debian：**
+```bash
+# 导入 GPG key
+wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch | sudo gpg --dearmor -o /usr/share/keyrings/elasticsearch-keyring.gpg
+
+# 添加源
+echo "deb [signed-by=/usr/share/keyrings/elasticsearch-keyring.gpg] https://artifacts.elastic.co/packages/8.x/apt stable main" | sudo tee /etc/apt/sources.list.d/elastic-8.x.list
+
+# 安装
+sudo apt update && sudo apt install -y elasticsearch
+
+# 禁用安全认证（开发环境）
+sudo sed -i 's/xpack.security.enabled: true/xpack.security.enabled: false/' /etc/elasticsearch/elasticsearch.yml
+# 若文件中没有该行，手动追加
+echo "xpack.security.enabled: false" | sudo tee -a /etc/elasticsearch/elasticsearch.yml
+
+# 启动并设置开机自启
+sudo systemctl daemon-reload
+sudo systemctl enable elasticsearch
+sudo systemctl start elasticsearch
+```
+
+**CentOS / RHEL：**
+```bash
+# 添加 yum 源
+sudo rpm --import https://artifacts.elastic.co/GPG-KEY-elasticsearch
+cat <<EOF | sudo tee /etc/yum.repos.d/elasticsearch.repo
+[elasticsearch]
+name=Elasticsearch repository for 8.x packages
+baseurl=https://artifacts.elastic.co/packages/8.x/yum
+gpgcheck=1
+gpgkey=https://artifacts.elastic.co/GPG-KEY-elasticsearch
+enabled=1
+autorefresh=1
+type=rpm-md
+EOF
+
+# 安装
+sudo yum install -y elasticsearch
+
+# 禁用安全认证
+echo "xpack.security.enabled: false" | sudo tee -a /etc/elasticsearch/elasticsearch.yml
+
+# 启动并设置开机自启
+sudo systemctl daemon-reload
+sudo systemctl enable elasticsearch
+sudo systemctl start elasticsearch
+```
+
+验证：
+```bash
+curl http://localhost:9200
+```
 
 ### 已安装 ES 后如何启动
 
