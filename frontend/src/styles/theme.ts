@@ -1,0 +1,18 @@
+export const theme = {
+  bg: '#ffffff',
+  panel: '#f0f4f9',
+  sidebar: '#f0f4f9',
+  border: '#e0e0e0',
+  textPrimary: '#1f1f1f',
+  textSecondary: '#6b7280',
+  textInterim: '#9ca3af',
+  accent: '#1a73e8',
+  accentLight: 'rgba(26,115,232,0.1)',
+  green: '#16a34a',
+  blue: '#1a73e8',
+  red: '#dc2626',
+  cardBg: '#f8f9fa',
+  inputBg: '#f0f4f9',
+  fontMono: "'JetBrains Mono', 'Fira Code', monospace",
+  fontSans: "'Google Sans', 'Inter', 'Segoe UI', sans-serif",
+};
