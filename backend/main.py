@@ -6,7 +6,6 @@ from backend.routers import asr, chat
 from backend.routers.session import router as session_router
 from backend.routers.kb import router as kb_router
 from backend.services.aliyun_asr_client import _get_token
-from backend.services.session_manager import init_db
 
 app = FastAPI(title=settings.app_name, debug=settings.debug)
 
@@ -26,8 +25,7 @@ app.include_router(kb_router)
 
 @app.on_event("startup")
 async def startup():
-    """初始化数据库 + 预热阿里云 ASR Token"""
-    await init_db()
+    """预热阿里云 ASR Token"""
     try:
         await _get_token(settings.aliyun_access_key_id, settings.aliyun_access_key_secret)
     except Exception as e:

@@ -31,6 +31,15 @@ export async function deleteSession(id: string): Promise<void> {
   await fetch(`/api/session/${id}`, { method: 'DELETE' });
 }
 
+export function exportSessionQuestions(id: string): void {
+  const a = document.createElement('a');
+  a.href = `/api/session/${id}/export`;
+  a.download = '';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
 // --- Chat API ---
 
 export async function classifyText(text: string): Promise<boolean> {

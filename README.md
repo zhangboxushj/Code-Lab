@@ -1,6 +1,24 @@
 # 面试助手 AI Interview Assistant
 
-实时语音/文字面试辅助工具，支持 ASR 转录、知识库检索、DeepSeek 流式回答。
+实时语音/文字面试辅助工具，支持 ASR 语音转录、知识库检索增强、DeepSeek 流式回答，帮助候选人在面试中快速获取专业答案。
+
+---
+
+## 目录
+
+- [技术栈](#技术栈)
+- [依赖安装](#依赖安装)
+  - [1. Node.js](#1-nodejs)
+  - [2. Python](#2-python)
+  - [3. Redis](#3-redis)
+  - [4. Elasticsearch](#4-elasticsearch)
+- [获取 API Key](#获取-api-key)
+- [配置环境变量](#配置环境变量)
+- [安装项目依赖](#安装项目依赖)
+- [启动项目](#启动项目)
+- [使用流程](#使用流程)
+- [知识库管理](#知识库管理)
+- [目录结构](#目录结构)
 
 ---
 
@@ -8,50 +26,159 @@
 
 | 层 | 技术 |
 |---|---|
-| 后端 | FastAPI + uvicorn (全异步) |
+| 后端 | FastAPI + uvicorn（全异步） |
 | 前端 | React 18 + TypeScript + Vite |
+| 会话缓存 | Redis（滑动窗口上下文 + 问题历史） |
 | ASR | 阿里云 NLS 实时语音识别 |
-| LLM | DeepSeek Chat (流式 SSE) |
+| LLM | DeepSeek Chat（流式 SSE），Qwen3 兜底 |
 | 向量检索 | Elasticsearch 8 + 阿里云 dashscope Embedding |
 
 ---
 
-## 环境要求
+## 依赖安装
 
-- Python 3.11+
-- Node.js 18+
-- Elasticsearch 8.x（必须，用于知识库向量检索）
-- SQLite3（内置于 Python，无需单独安装）
+> **请按顺序完成以下所有依赖的安装，再进行项目配置和启动。**
 
----
+### 1. Node.js
 
-## SQLite 会话数据库
+前端运行环境，要求 **18.x 或以上**。
 
-SQLite3 是 Python 标准库内置模块，**无需安装任何额外软件**。
+**Windows / Mac：**
 
-数据库文件会在首次启动后端时自动创建于：
+访问 [https://nodejs.org](https://nodejs.org)，下载 LTS 版本安装包，按向导安装。
 
-```
-backend/data/sessions.db
-```
-
-存储内容：
-- 所有会话记录（session_id、名称、创建时间）
-- 每条对话的完整历史消息
-
-**重启后端后，历史会话和对话记录完整保留。**
-
-如需清空所有会话数据，直接删除该文件即可：
+安装完成后验证：
 
 ```bash
-rm backend/data/sessions.db
+node -v   # 应输出 v18.x.x 或更高
+npm -v    # 应输出 9.x.x 或更高
+```
+
+**Linux（Ubuntu / Debian）：**
+
+```bash
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt install -y nodejs
+node -v
+```
+
+**Linux（CentOS / RHEL）：**
+
+```bash
+curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash -
+sudo yum install -y nodejs
+node -v
 ```
 
 ---
 
-## 安装 Elasticsearch
+### 2. Python
 
-### 方式一：Docker（推荐）
+后端运行环境，要求 **3.11 或以上**。
+
+**Windows / Mac：**
+
+访问 [https://www.python.org/downloads](https://www.python.org/downloads)，下载 3.11+ 安装包。
+
+> Windows 安装时勾选 **「Add Python to PATH」**。
+
+安装完成后验证：
+
+```bash
+python --version   # 应输出 Python 3.11.x 或更高
+pip --version
+```
+
+**Linux（Ubuntu / Debian）：**
+
+```bash
+sudo apt update
+sudo apt install -y python3.11 python3.11-venv python3-pip
+python3.11 --version
+```
+
+**推荐使用 conda 管理虚拟环境（可选）：**
+
+```bash
+conda create -n interview python=3.11
+conda activate interview
+```
+
+---
+
+### 3. Redis
+
+用于会话上下文缓存（滑动窗口 3 轮，TTL 2h）和面试题历史存储（TTL 7d）。
+
+#### Docker 安装（推荐）
+
+```bash
+docker run -d \
+  --name redis \
+  -p 6379:6379 \
+  redis:7-alpine
+```
+
+验证：
+
+```bash
+docker exec -it redis redis-cli ping
+# 返回 PONG 即成功
+```
+
+#### Windows 本地安装
+
+访问 [https://github.com/tporadowski/redis/releases](https://github.com/tporadowski/redis/releases)，下载最新 `.msi` 安装包，按向导安装。
+
+安装后启动服务：
+
+```bash
+redis-server
+```
+
+#### Linux（Ubuntu / Debian）
+
+```bash
+sudo apt update
+sudo apt install -y redis-server
+sudo systemctl enable redis-server
+sudo systemctl start redis-server
+redis-cli ping   # 返回 PONG 即成功
+```
+
+#### Linux（CentOS / RHEL）
+
+```bash
+sudo yum install -y epel-release
+sudo yum install -y redis
+sudo systemctl enable redis
+sudo systemctl start redis
+redis-cli ping
+```
+
+#### 开启持久化（推荐，防止重启丢数据）
+
+编辑 Redis 配置文件（通常在 `/etc/redis/redis.conf` 或 Redis 安装目录下）：
+
+```conf
+# 开启 AOF 持久化
+appendonly yes
+appendfsync everysec
+```
+
+重启 Redis 生效：
+
+```bash
+sudo systemctl restart redis-server
+```
+
+---
+
+### 4. Elasticsearch
+
+用于知识库向量检索（BM25 + kNN 混合搜索），要求 **8.x 版本**。
+
+#### Docker 安装（推荐）
 
 ```bash
 docker run -d \
@@ -63,17 +190,15 @@ docker run -d \
   elasticsearch:8.13.0
 ```
 
-验证是否启动成功：
+验证：
 
 ```bash
 curl http://localhost:9200
+# 返回包含 "tagline": "You Know, for Search" 即成功
 ```
 
-返回包含 `"tagline": "You Know, for Search"` 即为成功。
+#### Windows / Mac 本地安装
 
-### 方式二：本地安装
-
-#### Windows / Mac
 1. 访问 [https://www.elastic.co/downloads/elasticsearch](https://www.elastic.co/downloads/elasticsearch) 下载 8.x 版本
 2. 解压后进入目录，编辑 `config/elasticsearch.yml`，添加：
    ```yaml
@@ -81,15 +206,15 @@ curl http://localhost:9200
    ```
 3. 启动：
    ```bash
-   # Mac/Linux
+   # Mac / Linux
    ./bin/elasticsearch
+
    # Windows
    bin\elasticsearch.bat
    ```
 
-#### Linux（apt / yum）
+#### Linux（Ubuntu / Debian）
 
-**Ubuntu / Debian：**
 ```bash
 # 导入 GPG key
 wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch | sudo gpg --dearmor -o /usr/share/keyrings/elasticsearch-keyring.gpg
@@ -101,8 +226,6 @@ echo "deb [signed-by=/usr/share/keyrings/elasticsearch-keyring.gpg] https://arti
 sudo apt update && sudo apt install -y elasticsearch
 
 # 禁用安全认证（开发环境）
-sudo sed -i 's/xpack.security.enabled: true/xpack.security.enabled: false/' /etc/elasticsearch/elasticsearch.yml
-# 若文件中没有该行，手动追加
 echo "xpack.security.enabled: false" | sudo tee -a /etc/elasticsearch/elasticsearch.yml
 
 # 启动并设置开机自启
@@ -111,10 +234,13 @@ sudo systemctl enable elasticsearch
 sudo systemctl start elasticsearch
 ```
 
-**CentOS / RHEL：**
+#### Linux（CentOS / RHEL）
+
 ```bash
-# 添加 yum 源
+# 导入 GPG key
 sudo rpm --import https://artifacts.elastic.co/GPG-KEY-elasticsearch
+
+# 添加 yum 源
 cat <<EOF | sudo tee /etc/yum.repos.d/elasticsearch.repo
 [elasticsearch]
 name=Elasticsearch repository for 8.x packages
@@ -139,65 +265,49 @@ sudo systemctl start elasticsearch
 ```
 
 验证：
+
 ```bash
 curl http://localhost:9200
 ```
 
-### 已安装 ES 后如何启动
+#### 已安装后如何启动
 
-**Docker 方式**（容器已存在，重启即可）：
 ```bash
+# Docker 方式（容器已存在）
 docker start es8
+
+# Linux systemd
+sudo systemctl start elasticsearch
+
+# Windows / Mac 本地安装
+./bin/elasticsearch        # Mac/Linux
+bin\elasticsearch.bat      # Windows
 ```
-
-**本地安装方式**（每次重新进入解压目录执行）：
-```bash
-# Linux/Mac
-cd /path/to/elasticsearch-8.x.x
-./bin/elasticsearch
-
-# Windows
-cd C:\path\to\elasticsearch-8.x.x
-bin\elasticsearch.bat
-```
-
-> 建议将 ES 启动命令加入系统服务或开机自启，避免每次手动启动。
-
-> ES 默认监听 `http://localhost:9200`，与 `.env` 中 `ES_URL` 保持一致即可。
 
 ---
 
-## 快速启动
+## 获取 API Key
 
-### 1. 克隆项目
-
-```bash
-git clone <repo-url>
-cd Interview_Assistant
-```
-
-### 2. 获取 API Key
-
-#### DeepSeek API Key
+### DeepSeek API Key
 
 1. 访问 [https://platform.deepseek.com](https://platform.deepseek.com) 注册账号
 2. 进入「API Keys」页面，点击「创建 API Key」
 3. 复制生成的 Key，填入 `DEEPSEEK_API_KEY`
 
-#### 阿里云 AccessKey（ASR + Embedding 共用）
+### 阿里云 AccessKey（ASR 语音识别用）
 
 1. 访问 [https://ram.console.aliyun.com](https://ram.console.aliyun.com) 登录阿里云控制台
-2. 左侧菜单选择「用户」→「创建用户」，勾选「OpenAPI 调用访问」
-3. 创建完成后保存 `AccessKey ID` 和 `AccessKey Secret`（只显示一次）
-4. 为该用户授权：`AliyunNLSFullAccess`（ASR）和 `AliyunDashScopeFullAccess`（Embedding）
+2. 左侧菜单「用户」→「创建用户」，勾选「OpenAPI 调用访问」
+3. 创建完成后保存 `AccessKey ID` 和 `AccessKey Secret`（**只显示一次**）
+4. 为该用户授权：`AliyunNLSFullAccess`
 
-#### 阿里云 NLS AppKey（语音识别）
+### 阿里云 NLS AppKey（语音识别项目 Key）
 
 1. 访问 [https://nls-portal.console.aliyun.com](https://nls-portal.console.aliyun.com)
 2. 点击「创建项目」，开通「实时语音识别」服务
-3. 进入项目详情，复制 `AppKey` 填入 `ALIYUN_NLS_APP_KEY`
+3. 进入项目详情，复制 `AppKey` 填入 `ALIYUN_ASR_APP_KEY`
 
-#### 阿里云 dashscope API Key（Embedding + Qwen3 兜底）
+### 阿里云 dashscope API Key（Embedding + Qwen3 兜底）
 
 1. 访问 [https://dashscope.console.aliyun.com](https://dashscope.console.aliyun.com)
 2. 左侧菜单「API-KEY 管理」→「创建新的 API-KEY」
@@ -207,23 +317,23 @@ cd Interview_Assistant
 
 ---
 
-### 3. 配置环境变量
+## 配置环境变量
 
 ```bash
 cp backend/.env.example backend/.env
 ```
 
-编辑 `backend/.env`，填入以下 Key：
+编辑 `backend/.env`，填入所有 Key：
 
 ```env
-# DeepSeek
+# DeepSeek（主 LLM）
 DEEPSEEK_API_KEY=your_deepseek_key_here
 DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
 
 # 阿里云 ASR (NLS)
 ALIYUN_ACCESS_KEY_ID=your_access_key_id
 ALIYUN_ACCESS_KEY_SECRET=your_access_key_secret
-ALIYUN_NLS_APP_KEY=your_nls_app_key
+ALIYUN_ASR_APP_KEY=your_nls_app_key
 
 # 阿里云 dashscope Embedding
 DASHSCOPE_API_KEY=your_dashscope_key_here
@@ -235,36 +345,56 @@ QWEN3_API_KEY=your_dashscope_key_here
 QWEN3_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 QWEN3_MODEL=qwen3-14b
 
-# Elasticsearch（必须）
+# Elasticsearch
 ES_URL=http://localhost:9200
 ES_INDEX=interview_kb
 ES_USERNAME=
 ES_PASSWORD=
 ES_SCORE_THRESHOLD=0.85
+
+# Redis
+REDIS_URL=redis://localhost:6379/0
 ```
 
-### 4. 安装后端依赖
+---
+
+## 安装项目依赖
+
+### 后端依赖
 
 ```bash
-cd backend
-pip install -r requirements.txt
+# 在项目根目录执行
+pip install -r backend/requirements.txt
 ```
 
-> 推荐使用 conda 或 venv 隔离环境：
-> ```bash
-> conda create -n interview python=3.11
-> conda activate interview
-> pip install -r requirements.txt
-> ```
+依赖清单：
 
-### 5. 安装前端依赖
+| 包 | 版本 | 用途 |
+|---|---|---|
+| fastapi | 0.111.0 | Web 框架 |
+| uvicorn[standard] | 0.29.0 | ASGI 服务器 |
+| websockets | 12.0 | WebSocket 支持 |
+| python-dotenv | 1.0.1 | 环境变量加载 |
+| pydantic-settings | 2.2.1 | 配置管理 |
+| httpx | 0.27.0 | 异步 HTTP 客户端 |
+| elasticsearch[async] | 8.13.0 | ES 客户端 |
+| openai | 1.30.0 | OpenAI 兼容接口 |
+| redis[asyncio] | 5.0.4 | Redis 异步客户端 |
+
+### 前端依赖
 
 ```bash
 cd frontend
 npm install
 ```
 
-### 6. 启动后端
+---
+
+## 启动项目
+
+> 启动前请确认 Redis 和 Elasticsearch 均已运行。
+
+### 启动后端
 
 在项目根目录执行：
 
@@ -275,13 +405,13 @@ uvicorn backend.main:app --host 0.0.0.0 --port 8001 --reload
 启动成功后会看到：
 
 ```
-[AliyunASR] new token acquired, expires at ...
+[startup] ASR token warmup ...
 INFO: Uvicorn running on http://0.0.0.0:8001
 ```
 
-### 7. 启动前端
+### 启动前端
 
-新开一个终端，在 `frontend/` 目录执行：
+新开一个终端：
 
 ```bash
 cd frontend
@@ -300,7 +430,7 @@ npm run dev
    - **打字模式**：在底部输入框输入问题，按 Enter 或点击「发送」
 3. AI 自动检索知识库并流式生成回答
 4. 会话名称自动以第一个问题命名
-5. 左侧可切换历史会话，点击 × 删除会话
+5. 鼠标悬停会话，点击 **↓** 导出本次所有面试题为 `.md` 文件，点击 **×** 删除会话
 
 ---
 
@@ -311,15 +441,10 @@ npm run dev
 3. 文件会自动分块并写入 Elasticsearch
 4. 点击文件右侧 × 可删除
 
----
-
-## 初始化知识库（可选）
-
-如果已有 `.md` 文件想批量导入：
+批量导入已有文件：
 
 ```bash
-cd backend
-python scripts/init_kb.py
+python backend/scripts/init_kb.py
 ```
 
 ---
@@ -329,29 +454,35 @@ python scripts/init_kb.py
 ```
 Interview_Assistant/
 ├── backend/
-│   ├── core/               # 配置 (config.py)
-│   ├── routers/            # API 路由 (asr, chat, session, kb)
+│   ├── core/
+│   │   └── config.py             # Pydantic 配置（读取 .env）
+│   ├── routers/
+│   │   ├── asr.py                # WebSocket /ws/asr（阿里云 NLS）
+│   │   ├── chat.py               # GET /api/chat/stream（SSE 流式回答）
+│   │   ├── session.py            # /api/session CRUD + 导出
+│   │   └── kb.py                 # /api/kb 知识库上传/删除
 │   ├── services/
-│   │   ├── prompts.py      # 所有 LLM 提示词常量
-│   │   ├── llm_client.py   # LLM 客户端 (DeepSeek 优先, Qwen3 兜底)
-│   │   ├── aliyun_asr_client.py  # 阿里云 NLS ASR
-│   │   ├── corrector.py    # ASR 纠错封装
-│   │   ├── retriever.py    # ES 混合检索
-│   │   └── session_manager.py   # SQLite 会话持久化
-│   ├── scripts/            # 知识库初始化脚本
-│   ├── knowledge_base/     # 上传的文档存储目录
-│   ├── data/               # SQLite 数据库 (自动创建)
-│   ├── main.py
+│   │   ├── prompts.py            # 所有 LLM 提示词常量
+│   │   ├── llm_client.py         # LLM 客户端（DeepSeek 优先，Qwen3 兜底）
+│   │   ├── aliyun_asr_client.py  # 阿里云 NLS ASR 客户端
+│   │   ├── corrector.py          # ASR 纠错封装
+│   │   ├── retriever.py          # ES 混合检索（BM25 + kNN）
+│   │   └── session_manager.py    # Redis 会话持久化
+│   ├── scripts/
+│   │   └── init_kb.py            # 知识库批量初始化脚本
+│   ├── knowledge_base/           # 上传的文档存储目录
+│   ├── main.py                   # FastAPI 入口
 │   ├── requirements.txt
-│   ├── .env                # 环境变量 (不提交)
-│   └── .env.example        # 环境变量模板
+│   ├── .env                      # 环境变量（不提交 git）
+│   └── .env.example              # 环境变量模板
 └── frontend/
     ├── src/
-    │   ├── api/            # 所有 HTTP/SSE 调用
-    │   ├── components/     # UI 组件
-    │   ├── hooks/          # React Hooks
-    │   ├── styles/         # CSS 变量 + 主题
-    │   └── types/          # TypeScript 类型定义
+    │   ├── api/index.ts          # 所有 HTTP/SSE 调用
+    │   ├── components/           # UI 组件
+    │   ├── hooks/                # React Hooks
+    │   ├── styles/               # CSS 变量 + 主题
+    │   └── types/                # TypeScript 类型定义
+    ├── index.html
     ├── package.json
     └── vite.config.ts
 ```

@@ -1,6 +1,12 @@
 import ReactMarkdown from 'react-markdown';
 import type { QACard } from '../types';
 
+const IconSparkle = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 3l1.88 5.76a1 1 0 0 0 .95.69h6.06l-4.9 3.56a1 1 0 0 0-.36 1.12L17.5 20l-4.9-3.56a1 1 0 0 0-1.18 0L6.5 20l1.87-5.87a1 1 0 0 0-.36-1.12L3.11 9.45h6.06a1 1 0 0 0 .95-.69L12 3z"/>
+  </svg>
+);
+
 function SourceBadge({ source }: { source: QACard['source'] }) {
   return (
     <span className={`source-badge source-badge--${source === 'kb' ? 'kb' : 'direct'}`}>
@@ -18,21 +24,11 @@ const mdComponents = {
       <code>{children}</code>
     );
   },
-  strong({ children }: { children?: React.ReactNode }) {
-    return <strong>{children}</strong>;
-  },
-  h3({ children }: { children?: React.ReactNode }) {
-    return <h3>{children}</h3>;
-  },
-  p({ children }: { children?: React.ReactNode }) {
-    return <p>{children}</p>;
-  },
-  ul({ children }: { children?: React.ReactNode }) {
-    return <ul>{children}</ul>;
-  },
-  li({ children }: { children?: React.ReactNode }) {
-    return <li>{children}</li>;
-  },
+  strong({ children }: { children?: React.ReactNode }) { return <strong>{children}</strong>; },
+  h3({ children }: { children?: React.ReactNode }) { return <h3>{children}</h3>; },
+  p({ children }: { children?: React.ReactNode }) { return <p>{children}</p>; },
+  ul({ children }: { children?: React.ReactNode }) { return <ul>{children}</ul>; },
+  li({ children }: { children?: React.ReactNode }) { return <li>{children}</li>; },
 };
 
 interface Props {
@@ -45,9 +41,16 @@ export default function QAList({ qaCards, inputMode }: Props) {
     return (
       <div className="qa-list">
         <div className="qa-list__empty">
-          <div style={{ fontSize: 40 }}>🎙</div>
-          <div style={{ fontSize: 16, fontWeight: 500, color: 'var(--text-primary)' }}>面试助手已就绪</div>
-          <div style={{ fontSize: 14 }}>
+          <div style={{
+            width: 52, height: 52, borderRadius: 14,
+            background: 'var(--panel)', border: '1px solid var(--border)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            color: 'var(--accent)', marginBottom: 8,
+          }}>
+            <IconSparkle />
+          </div>
+          <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-secondary)' }}>面试助手已就绪</div>
+          <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
             {inputMode === 'voice' ? '点击下方按钮开始录音' : '在下方输入框输入问题'}
           </div>
         </div>
@@ -68,7 +71,7 @@ export default function QAList({ qaCards, inputMode }: Props) {
             <div className="qa-card__badge qa-card__badge--a">A</div>
             <div className="qa-card__text">
               {card.phase === 'retrieving' && (
-                <span style={{ color: 'var(--text-secondary)', fontStyle: 'italic' }}>检索知识库中...</span>
+                <span style={{ color: 'var(--text-muted)', fontStyle: 'italic', fontSize: 13 }}>检索知识库中...</span>
               )}
               {(card.phase === 'generating' || card.phase === 'done') && (
                 <div className="md-content">

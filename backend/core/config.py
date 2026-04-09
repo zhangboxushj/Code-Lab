@@ -32,6 +32,11 @@ class Settings(BaseSettings):
     es_password: str = ""
     es_score_threshold: float = 0.85
 
+    # Redis
+    redis_url: str = "redis://localhost:6379/0"
+    redis_context_ttl: int = 7200       # 2h — sliding context window
+    redis_questions_ttl: int = 604800   # 7d — full question list for export
+
     class Config:
         env_file = "backend/.env"
         extra = "ignore"

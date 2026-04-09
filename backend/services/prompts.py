@@ -69,6 +69,17 @@ INTENT_PROMPT = """\
 # Input Content
 {text}"""
 
+REWRITE_QUERY_PROMPT = """\
+你是一个搜索查询优化专家。根据对话历史和当前问题，将当前问题改写为一个独立、完整、适合检索的查询语句。
+只输出改写后的查询语句，不要任何解释。
+
+对话历史：
+{history}
+
+当前问题：{question}
+
+改写后的查询："""
+
 CORRECT_TRANSCRIPT_PROMPT = """\
 你是AI/ML领域的语音识别纠错专家。请纠正以下语音识别文本中的错别字和专业术语错误。
 

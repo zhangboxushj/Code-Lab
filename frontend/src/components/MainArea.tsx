@@ -25,9 +25,13 @@ export default function MainArea({
     return (
       <div className="main">
         <div className="main__empty">
-          <div className="main__empty-icon">💬</div>
+          <div className="main__empty-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+            </svg>
+          </div>
           <div className="main__empty-title">还没有会话</div>
-          <div>点击左侧「发起新会话」开始</div>
+          <div className="main__empty-sub">点击左侧「发起新会话」开始</div>
         </div>
       </div>
     );

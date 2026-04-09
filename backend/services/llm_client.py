@@ -12,6 +12,7 @@ from backend.services.prompts import (
     INTENT_PROMPT,
     INTRO_PROMPT,
     RAG_TEMPLATE,
+    REWRITE_QUERY_PROMPT,
     SCENE_PROMPT,
     SYSTEM_PROMPT,
 )
@@ -148,6 +149,18 @@ class LLMClient:
         messages = [{"role": "system", "content": SYSTEM_PROMPT}, *history, {"role": "user", "content": user_content}]
         async for chunk in self._stream(messages):
             yield chunk
+
+    async def rewrite_query(self, question: str, history: list[dict]) -> str:
+        """Rewrite a follow-up question into a standalone search query."""
+        history_text = "\n".join(f"{m['role']}: {m['content']}" for m in history[-4:])
+        data = await self._post({
+            "messages": [{"role": "user", "content": REWRITE_QUERY_PROMPT.format(
+                history=history_text, question=question
+            )}],
+            "stream": False,
+            "max_tokens": 100,
+        })
+        return data["choices"][0]["message"]["content"].strip()
 
     async def aclose(self) -> None:
         await self._deepseek.aclose()
