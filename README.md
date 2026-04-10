@@ -57,7 +57,7 @@ npm -v    # 应输出 9.x.x 或更高
 **Linux（Ubuntu / Debian）：**
 
 ```bash
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
 sudo apt install -y nodejs
 node -v
 ```
