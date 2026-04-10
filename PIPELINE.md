@@ -163,9 +163,24 @@ question
   → DeepSeek stream=True 流式生成
 ```
 
-### 5.3 上下文记忆
+### 5.3 上下文记忆（滑动窗口）
 
-每次问答完成后，`update_session` 将 `user` 和 `assistant` 消息追加到 session history，下次请求时一并传给 DeepSeek，实现多轮对话记忆。history 最多保留 40 条消息（20轮对话），超出后滚动丢弃最早的记录。
+每次问答完成后，`update_context` 将 `user` 和 `assistant` 消息写入 Redis List，并通过 `LPUSH + LTRIM` 维持最近 **6 条消息（3轮对话）** 的滑动窗口，TTL 2 小时。下次请求时从 Redis 读取这 6 条作为 history 传给 LLM，保证追问场景的上下文连贯性，同时避免 context 过长。
+
+### 5.4 Query Rewriting（条件触发）
+
+```
+question
+  → 检测是否含代词（它、这个、那个、你刚才、上面、前面、之前、该、此）
+  → 若含代词 AND history 非空：
+      → 取最近 4 条 history + 当前 question
+      → 调用 LLM（REWRITE_QUERY_PROMPT，max_tokens=100）
+      → 返回独立完整的检索查询语句
+  → 用改写后的 query 做 ES 检索（原始 question 仍用于 LLM 生成）
+  → 若不含代词：直接用原始 question 检索
+```
+
+**目的**：追问时用户常说"它的原理是什么"、"这个怎么实现"，直接用这类问题做向量检索效果差。改写后变成"XXX 的原理是什么"，检索准确率显著提升。
 
 ---
 
@@ -193,35 +208,70 @@ createSession() → POST /api/session → 返回 session_id
   ↓
 第一个问题发出后 → PATCH /api/session/{id}/name（以问题前30字命名）
   ↓
-每轮问答 → update_session(role="user/assistant", content=...)
+每轮问答：
+  ├── append_question(session_id, question)   → Redis List session:{id}:questions（TTL 7d）
+  ├── update_context(session_id, "user", ...)  → Redis List session:{id}:context（滑动窗口，TTL 2h）
+  └── update_context(session_id, "assistant", ...)
   ↓
 切换会话 → 前端重置 qaCards / utterances / firstQuestionFired
   ↓
-删除会话 → DELETE /api/session/{id}
+删除会话 → DELETE /api/session/{id} → 清除 Redis 所有相关 key
+  ↓
+导出面试题 → GET /api/session/{id}/export → 读取 questions list → 生成 .md 文件下载
 ```
 
-会话数据存储在后端内存中（`_sessions` dict），服务重启后清空。
+### Redis Key 设计
+
+| Key | 类型 | 内容 | TTL |
+|-----|------|------|-----|
+| `session:list` | Set | 所有 session_id | 永久 |
+| `session:{id}:meta` | Hash | name, created_at | 永久 |
+| `session:{id}:context` | List | 最近 6 条消息（3轮） | 2h（滑动刷新） |
+| `session:{id}:questions` | List | 全量问题文本 | 7d |
+
+**持久化**：Redis 开启 AOF + RDB，服务重启后数据完整保留。context 窗口 2h 到期自动清除（节省内存），questions 列表保留 7 天供随时导出。
+
+### 导出面试题流程
+
+```
+GET /api/session/{id}/export
+  → get_questions(session_id)  从 Redis 读取全量问题列表
+  → 生成 Markdown 格式：
+      # 面试题汇总
+      ## Q1. 问题文本
+      **答案：**（留空，供用户手动填写）
+      ---
+  → Response(content, media_type="text/markdown")
+  → 浏览器触发文件下载 interview_questions_{date}.md
+```
 
 ---
 
 ## 八、完整时序图
 
 ```
-用户          前端              后端 ASR          后端 Chat         DeepSeek
- |             |                   |                  |                |
- |--说话-----→|                   |                  |                |
- |             |--PCM音频(WS)----→|                  |                |
- |             |                   |--NLS识别------→ |                |
- |             |                   |←--interim/final--|                |
- |             |                   |--纠错(DeepSeek)→|                |
- |             |←--transcript------|                  |                |
- |             |                   |                  |                |
- |             |--GET /chat/stream(question)--------→|                |
- |             |                   |                  |--Embedding---→|
- |             |                   |                  |←--vector------|
- |             |                   |                  |--ES混合检索    |
- |             |                   |                  |--分类/RAG---→ |
- |             |                   |                  |←--stream chunk-|
- |             |←--SSE chunk--------------------------------|         |
- |←--渲染-----|                   |                  |                |
+用户          前端              后端 ASR          后端 Chat         DeepSeek/Qwen3      Redis         ES
+ |             |                   |                  |                  |               |              |
+ |--说话-----→|                   |                  |                  |               |              |
+ |             |--PCM音频(WS)----→|                  |                  |               |              |
+ |             |                   |--NLS识别------→ |                  |               |              |
+ |             |                   |←--interim/final--|                  |               |              |
+ |             |                   |--纠错----------→|                  |               |              |
+ |             |←--transcript------|                  |                  |               |              |
+ |             |                   |                  |                  |               |              |
+ |             |--GET /chat/stream(question)--------→|                  |               |              |
+ |             |                   |                  |--get_session()→ |               |←--context----|
+ |             |                   |                  |--代词检测        |               |              |
+ |             |                   |                  |--rewrite_query→ |               |              |
+ |             |                   |                  |←--rewritten_q---|               |              |
+ |             |                   |                  |--Embedding-----→|               |              |
+ |             |                   |                  |←--vector--------|               |              |
+ |             |                   |                  |--ES混合检索---------------------------→|
+ |             |                   |                  |←--docs--------------------------------|
+ |             |                   |                  |--append_question()→|←--LPUSH---------|
+ |             |                   |                  |--stream_answer→ |               |              |
+ |             |                   |                  |←--SSE chunks----|               |              |
+ |             |←--SSE chunk-----------------------------|               |               |              |
+ |←--渲染-----|                   |                  |                  |               |              |
+ |             |                   |                  |--update_context()→|←--LPUSH/LTRIM|              |
 ```

@@ -1,7 +1,12 @@
 import { useRef, useCallback } from 'react';
 
-const ASR_WS_URL = 'ws://localhost:8001/ws/asr';
 const SAMPLE_RATE = 16000;
+
+function getASRUrl(sessionId: string): string {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const host = window.location.host; // e.g. 127.0.0.1:5173 or your-server.com
+  return `${protocol}//${host}/ws/asr?session_id=${sessionId}`;
+}
 
 
 interface ASRCallbacks {
@@ -57,7 +62,7 @@ export function useASR(sessionId: string | null, callbacks: ASRCallbacks) {
       });
       streamRef.current = stream;
 
-      const ws = new WebSocket(`${ASR_WS_URL}?session_id=${sessionId}`);
+      const ws = new WebSocket(getASRUrl(sessionId));
       wsRef.current = ws;
 
       // Setup AudioContext (but don't connect yet)
