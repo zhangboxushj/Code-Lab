@@ -10,6 +10,8 @@ export interface QACard {
   answer: string;
   source: 'kb' | 'direct';
   phase: 'retrieving' | 'generating' | 'done';
+  elapsedMs?: number;
+  timeToFirstToken?: number;
 }
 
 export interface Session {

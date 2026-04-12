@@ -86,7 +86,7 @@ async def set_session_name(session_id: str, name: str) -> bool:
 async def update_context(session_id: str, role: str, content: str) -> None:
     """Append message to sliding context window (max 3 rounds = 6 messages)."""
     r = get_redis()
-    msg = json.dumps({"role": role, "content": content[:500]}, ensure_ascii=False)
+    msg = json.dumps({"role": role, "content": content[:settings.redis_context_msg_max_chars]}, ensure_ascii=False)
     async with r.pipeline() as pipe:
         pipe.rpush(_context_key(session_id), msg)
         pipe.ltrim(_context_key(session_id), -MAX_CONTEXT_MESSAGES, -1)
@@ -128,9 +128,14 @@ async def list_sessions() -> list[dict]:
     if not sids:
         return []
 
+    sids = list(sids)
+    async with r.pipeline() as pipe:
+        for sid in sids:
+            pipe.hgetall(_meta_key(sid))
+        results = await pipe.execute()
+
     sessions = []
-    for sid in sids:
-        meta = await r.hgetall(_meta_key(sid))
+    for sid, meta in zip(sids, results):
         if meta:
             sessions.append({
                 "session_id": sid,
@@ -138,6 +143,5 @@ async def list_sessions() -> list[dict]:
                 "created_at": meta.get("created_at", ""),
             })
 
-    # Sort by created_at descending
     sessions.sort(key=lambda s: s["created_at"], reverse=True)
     return sessions
