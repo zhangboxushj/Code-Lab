@@ -5,10 +5,11 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from backend.core.config import settings
 from backend.services.aliyun_asr_client import AliyunASRClient
-from backend.services.corrector import correct_asr_text
+from backend.services.llm_client import LLMClient
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+_llm = LLMClient()
 
 
 @router.websocket("/ws/asr")
@@ -21,7 +22,6 @@ async def asr_endpoint(websocket: WebSocket, session_id: str = ""):
             settings.aliyun_access_key_secret,
             settings.aliyun_asr_app_key,
         ) as asr:
-            # Notify frontend that ASR is ready to receive audio
             await websocket.send_json({"type": "ready"})
 
             first_audio_received = asyncio.Event()
@@ -39,11 +39,10 @@ async def asr_endpoint(websocket: WebSocket, session_id: str = ""):
                     await asr.send_end()
 
             async def _forward_results():
-                # Wait for first audio before listening for results
                 await asyncio.wait_for(first_audio_received.wait(), timeout=10.0)
                 async for text, is_final in asr.receive_results():
                     if is_final:
-                        corrected = await correct_asr_text(text)
+                        corrected = await _llm.correct_transcript(text)
                         await websocket.send_json(
                             {"type": "transcript", "text": corrected, "is_final": True}
                         )
@@ -54,9 +53,9 @@ async def asr_endpoint(websocket: WebSocket, session_id: str = ""):
 
             await asyncio.gather(_receive_audio(), _forward_results())
 
-    except Exception as e:
-        logger.exception(f"ASR endpoint error: {e}")
+    except Exception:
+        logger.exception("ASR endpoint error")
         try:
-            await websocket.send_json({"type": "error", "text": str(e)})
+            await websocket.send_json({"type": "error", "text": "ASR error"})
         except Exception:
             pass

@@ -1,6 +1,7 @@
 """LLM client with DeepSeek as primary and Qwen3 as fallback."""
 import json
 import logging
+import time
 from collections.abc import AsyncGenerator
 
 import httpx
@@ -31,6 +32,7 @@ class LLMClient:
             base_url=settings.qwen3_base_url,
             headers={"Authorization": f"Bearer {settings.qwen3_api_key}"},
             timeout=60,
+            proxy=None,
         )
 
     # ------------------------------------------------------------------
@@ -56,8 +58,32 @@ class LLMClient:
         resp.raise_for_status()
         return resp.json()
 
-    async def _stream(self, messages: list[dict]) -> AsyncGenerator[str, None]:
-        """Streaming POST: DeepSeek first, Qwen3 fallback."""
+    async def _stream(
+        self, messages: list[dict], timing: dict | None = None
+    ) -> AsyncGenerator[str, None]:
+        """Streaming POST: DeepSeek first, Qwen3 fallback.
+        If timing dict provided, fills llm_first_token_cost_ms and llm_generate_cost_ms.
+        """
+        t_request = time.perf_counter()
+        first_token_recorded = False
+
+        async def _iter_lines(resp_stream) -> AsyncGenerator[str, None]:
+            nonlocal first_token_recorded
+            async for line in resp_stream.aiter_lines():
+                if not line.startswith("data:"):
+                    continue
+                payload = line[5:].strip()
+                if payload == "[DONE]":
+                    return
+                delta = json.loads(payload)["choices"][0]["delta"].get("content", "")
+                if delta:
+                    if timing is not None and not first_token_recorded:
+                        timing["llm_first_token_cost_ms"] = int(
+                            (time.perf_counter() - t_request) * 1000
+                        )
+                        first_token_recorded = True
+                    yield delta
+
         try:
             async with self._deepseek.stream(
                 "POST",
@@ -65,18 +91,18 @@ class LLMClient:
                 json={"model": "deepseek-chat", "messages": messages, "stream": True},
             ) as resp:
                 resp.raise_for_status()
-                async for line in resp.aiter_lines():
-                    if not line.startswith("data:"):
-                        continue
-                    payload = line[5:].strip()
-                    if payload == "[DONE]":
-                        return
-                    delta = json.loads(payload)["choices"][0]["delta"].get("content", "")
-                    if delta:
-                        yield delta
+                async for chunk in _iter_lines(resp):
+                    yield chunk
+            if timing is not None:
+                timing["llm_generate_cost_ms"] = int(
+                    (time.perf_counter() - t_request) * 1000
+                ) - timing.get("llm_first_token_cost_ms", 0)
             return
         except Exception as e:
             logger.warning("DeepSeek stream failed, falling back to Qwen3: %s", e)
+            # reset timing for fallback
+            first_token_recorded = False
+            t_request = time.perf_counter()
 
         async with self._qwen.stream(
             "POST",
@@ -89,15 +115,12 @@ class LLMClient:
             },
         ) as resp:
             resp.raise_for_status()
-            async for line in resp.aiter_lines():
-                if not line.startswith("data:"):
-                    continue
-                payload = line[5:].strip()
-                if payload == "[DONE]":
-                    return
-                delta = json.loads(payload)["choices"][0]["delta"].get("content", "")
-                if delta:
-                    yield delta
+            async for chunk in _iter_lines(resp):
+                yield chunk
+        if timing is not None:
+            timing["llm_generate_cost_ms"] = int(
+                (time.perf_counter() - t_request) * 1000
+            ) - timing.get("llm_first_token_cost_ms", 0)
 
     # ------------------------------------------------------------------
     # Public API
@@ -135,19 +158,33 @@ class LLMClient:
         question: str,
         history: list[dict],
         context_docs: list[str] | None = None,
+        timing: dict | None = None,
     ) -> AsyncGenerator[str, None]:
-        """Stream answer chunks. Uses RAG template if docs provided, else classifies question type."""
+        """Stream answer chunks. Uses RAG template if docs provided, else classifies question type.
+        If timing dict provided, fills prompt_build_cost_ms, llm_first_token_cost_ms,
+        llm_generate_cost_ms, prompt_chars, context_chars.
+        """
+        t_prompt = time.perf_counter()
+
         if context_docs:
+            context_text = "\n\n".join(context_docs)
             user_content = RAG_TEMPLATE.format(
-                context="\n\n".join(context_docs),
+                context=context_text,
                 question=question,
             )
         else:
+            context_text = ""
             q_type = await self.classify_question(question)
             user_content = SCENE_PROMPT.format(question=question) if q_type == "scene" else INTRO_PROMPT.format(question=question)
 
         messages = [{"role": "system", "content": SYSTEM_PROMPT}, *history, {"role": "user", "content": user_content}]
-        async for chunk in self._stream(messages):
+
+        if timing is not None:
+            timing["prompt_build_cost_ms"] = int((time.perf_counter() - t_prompt) * 1000)
+            timing["prompt_chars"] = sum(len(m["content"]) for m in messages)
+            timing["context_chars"] = len(context_text)
+
+        async for chunk in self._stream(messages, timing=timing):
             yield chunk
 
     async def rewrite_query(self, question: str, history: list[dict]) -> str:

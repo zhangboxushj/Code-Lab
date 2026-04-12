@@ -30,12 +30,13 @@ class Settings(BaseSettings):
     es_index: str = "interview_kb"
     es_username: str = ""
     es_password: str = ""
-    es_score_threshold: float = 0.85
+    es_score_threshold: float = 0.1
 
     # Redis
     redis_url: str = "redis://localhost:6379/0"
     redis_context_ttl: int = 7200       # 2h — sliding context window
     redis_questions_ttl: int = 604800   # 7d — full question list for export
+    redis_context_msg_max_chars: int = 500  # truncate each message stored in context
 
     class Config:
         env_file = "backend/.env"

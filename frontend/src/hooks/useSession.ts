@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { listSessions, createSession, fetchSession, renameSession, deleteSession } from '../api';
+import { listSessions, createSession, renameSession, deleteSession } from '../api';
 import type { Session } from '../types';
 
 interface UseSessionReturn {
@@ -54,5 +54,3 @@ export function useSession(): UseSessionReturn {
     handleCreateSession, handleSwitchSession, handleSetSessionName, handleDeleteSession,
   };
 }
-
-export { fetchSession };

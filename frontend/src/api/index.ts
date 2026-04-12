@@ -52,9 +52,12 @@ export async function streamChatAnswer(
   sessionId: string,
   question: string,
   onChunk: (text: string) => void,
-  onDone: (source: QACard['source']) => void,
+  onDone: (source: QACard['source'], elapsedMs?: number, timeToFirstToken?: number) => void,
 ): Promise<void> {
   const url = `/api/chat/stream?session_id=${encodeURIComponent(sessionId)}&message=${encodeURIComponent(question)}`;
+  const t0 = performance.now();
+  let timeToFirstToken: number | undefined;
+
   const resp = await fetch(url);
   if (!resp.ok || !resp.body) { onDone('direct'); return; }
 
@@ -72,9 +75,15 @@ export async function streamChatAnswer(
       if (!line.startsWith('data:')) continue;
       const payload = line.slice(5).trim();
       if (!payload) continue;
-      const msg = JSON.parse(payload) as { type: string; text?: string; source?: string };
-      if (msg.type === 'chunk' && msg.text) onChunk(msg.text);
-      else if (msg.type === 'done') onDone((msg.source as QACard['source']) ?? 'direct');
+      const msg = JSON.parse(payload) as { type: string; text?: string; source?: string; elapsed_ms?: number };
+      if (msg.type === 'chunk' && msg.text) {
+        if (timeToFirstToken === undefined) {
+          timeToFirstToken = Math.round(performance.now() - t0);
+        }
+        onChunk(msg.text);
+      } else if (msg.type === 'done') {
+        onDone((msg.source as QACard['source']) ?? 'direct', msg.elapsed_ms, timeToFirstToken);
+      }
     }
   }
 }
